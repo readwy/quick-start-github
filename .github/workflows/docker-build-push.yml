@@ -1,0 +1,109 @@
+name: docker-build-push
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  docker-build-push:
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+      REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
+      REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Discover Dockerfiles and resolve image names
+        id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          image_list_file="$RUNNER_TEMP/docker-image-list.tsv"
+          changed_files_file="$RUNNER_TEMP/changed-files.txt"
+          : > "$image_list_file"
+
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            use_git_diff=false
+            if [[ -n "$EVENT_BEFORE" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]] \
+              && git cat-file -e "$EVENT_BEFORE^{commit}" >/dev/null 2>&1 \
+              && git cat-file -e "$EVENT_SHA^{commit}" >/dev/null 2>&1; then
+              if git diff --name-only "$EVENT_BEFORE" "$EVENT_SHA" > "$changed_files_file"; then
+                use_git_diff=true
+              fi
+            fi
+
+            if [[ "$use_git_diff" != "true" ]]; then
+              jq -r '
+                [
+                  (.commits[]? | .added[]?, .modified[]?, .removed[]?)
+                ]
+                | unique
+                | .[]
+              ' "$GITHUB_EVENT_PATH" > "$changed_files_file"
+            fi
+          elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            git diff --name-only HEAD^ HEAD > "$changed_files_file"
+          else
+            git diff-tree --root --no-commit-id --name-only -r HEAD > "$changed_files_file"
+          fi
+
+          while IFS= read -r dockerfile; do
+            if [[ -z "$dockerfile" || "$(basename "$dockerfile")" != "Dockerfile" ]]; then
+              continue
+            fi
+
+            image_line="$(grep -m1 -E '^# image_name:' "$dockerfile" || true)"
+            if [[ -z "$image_line" ]]; then
+              continue
+            fi
+
+            raw_image_name="${image_line#\# image_name: }"
+            resolved_image_name="$(bash -euo pipefail -c 'eval "printf %s \"$1\""' _ "$raw_image_name")"
+            if [[ -z "$resolved_image_name" ]]; then
+              echo "Resolved image name is empty for $dockerfile" >&2
+              exit 1
+            fi
+            full_image_name="${REGISTRY_URL}/${REGISTRY_NAMESPACE}/${resolved_image_name}"
+
+            printf '%s\t%s\n' "$dockerfile" "$full_image_name" >> "$image_list_file"
+          done < "$changed_files_file"
+
+          printf 'image_list_file=%s\n' "$image_list_file" >> "$GITHUB_OUTPUT"
+          if [[ -s "$image_list_file" ]]; then
+            printf 'has_images=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'has_images=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to registry
+        if: ${{ steps.filter.outputs.has_images == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY_URL" -u "$REGISTRY_USER" --password-stdin
+
+      - name: Build and push images
+        if: ${{ steps.filter.outputs.has_images == 'true' }}
+        shell: bash
+        env:
+          IMAGE_LIST_FILE: ${{ steps.filter.outputs.image_list_file }}
+        run: |
+          set -euo pipefail
+
+          while IFS=$'\t' read -r dockerfile full_image_name; do
+            if [[ -z "$dockerfile" ]]; then
+              continue
+            fi
+
+            context_dir=$(dirname "$dockerfile")
+            docker build -f "$dockerfile" -t "$full_image_name" "$context_dir"
+            docker push "$full_image_name"
+          done < "$IMAGE_LIST_FILE"
