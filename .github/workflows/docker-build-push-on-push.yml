@@ -273,6 +273,12 @@ jobs:
           SKIPPED_DOCKERFILES: ${{ steps.filter.outputs.skipped_dockerfiles }}
           SKIPPED_LIST_FILE: ${{ steps.filter.outputs.skipped_list_file }}
           WORKFLOW_REF: ${{ github.ref }}
+
+          CLAUDE_ANTHROPIC_AUTH_TOKEN: ${{ secrets.CLAUDE_ANTHROPIC_AUTH_TOKEN }}
+          CLAUDE_ANTHROPIC_BASE_URL: ${{ secrets.CLAUDE_ANTHROPIC_BASE_URL }}
+          CLAUDE_HAIKU_MODEL: ${{ secrets.CLAUDE_HAIKU_MODEL }}
+          CLAUDE_OPUS_MODEL: ${{ secrets.CLAUDE_OPUS_MODEL }}
+          CLAUDE_SONNET_MODEL: ${{ secrets.CLAUDE_SONNET_MODEL }}
         run: |
           set -euo pipefail
 
