@@ -66,7 +66,7 @@ jobs:
               return 1
             fi
 
-            if [[ ! "$resolved_image_name" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(\/[a-z0-9]+([._-][a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$ ]]; then
+            if [[ ! "$resolved_image_name" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(\/[a-z0-9]+([._-][a-z0-9]+)*)*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$ ]]; then
               >&2 echo "::error::Resolved image name is invalid for Docker naming rules: $resolved_image_name"
               return 1
             fi
