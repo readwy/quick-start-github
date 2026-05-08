@@ -159,6 +159,22 @@ jobs:
         run: |
           set -euo pipefail
 
+          derive_latest_image_ref() {
+            local image_ref="$1"
+            local last_path_segment
+
+            if [[ "$image_ref" == *@* ]]; then
+              return 1
+            fi
+
+            last_path_segment="${image_ref##*/}"
+            if [[ "$last_path_segment" != *:* ]]; then
+              return 1
+            fi
+
+            printf '%s:latest\n' "${image_ref%:*}"
+          }
+
           publish_image_list_file="$RUNNER_TEMP/publish-image-list.tsv"
           : > "$publish_image_list_file"
 
@@ -177,10 +193,19 @@ jobs:
             fi
 
             full_image_ref="${REGISTRY_URL}/${REGISTRY_NAMESPACE}/${image_name_without_registry}"
-            printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$publish_image_list_file"
+            latest_image_ref=""
+            if latest_image_ref="$(derive_latest_image_ref "$full_image_ref")"; then
+              printf 'derived_latest_image_ref=%s\n' "$latest_image_ref"
+            else
+              latest_image_ref=""
+              echo "::warning::Skipping latest tag generation because publish image ref has no explicit tag: $full_image_ref from $dockerfile"
+            fi
+
+            printf '%s\t%s\t%s\n' "$dockerfile" "$full_image_ref" "$latest_image_ref" >> "$publish_image_list_file"
             printf 'dockerfile=%s\n' "$dockerfile"
             printf 'discovered_image_ref=%s\n' "$discovered_image_ref"
             printf 'publish_image_ref=%s\n' "$full_image_ref"
+            printf 'latest_image_ref=%s\n' "$latest_image_ref"
           done < "$IMAGE_LIST_FILE"
           echo "::endgroup::"
 
@@ -239,7 +264,7 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Build and push operations"
-          while IFS=$'\t' read -r dockerfile full_image_ref; do
+          while IFS=$'\t' read -r dockerfile full_image_ref latest_image_ref; do
             if [[ -z "${dockerfile:-}" || -z "${full_image_ref:-}" ]]; then
               continue
             fi
@@ -248,14 +273,34 @@ jobs:
             echo "::group::Build and push: $full_image_ref"
             printf 'dockerfile=%s\n' "$dockerfile"
             printf 'full_image_ref=%s\n' "$full_image_ref"
+            printf 'latest_image_ref=%s\n' "$latest_image_ref"
             printf 'build_context=%s\n' "$context_dir"
             printf 'ref=%s\n' "$WORKFLOW_REF"
             echo "::notice::Starting docker build for $dockerfile on $WORKFLOW_REF"
             if docker build -f "$dockerfile" -t "$full_image_ref" "$context_dir"; then
               echo "::notice::Starting docker push for $full_image_ref"
               if docker push "$full_image_ref"; then
-                printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$success_list_file"
-                echo "::notice::Successfully built and pushed $full_image_ref from $dockerfile"
+                if [[ -n "${latest_image_ref:-}" ]]; then
+                  echo "::notice::Starting docker tag for latest image $latest_image_ref from $full_image_ref"
+                  if docker tag "$full_image_ref" "$latest_image_ref"; then
+                    echo "::notice::Starting docker push for $latest_image_ref"
+                    if docker push "$latest_image_ref"; then
+                      printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$success_list_file"
+                      echo "::notice::Successfully built and pushed $full_image_ref from $dockerfile"
+                      echo "::notice::Successfully pushed latest tag $latest_image_ref from $dockerfile"
+                    else
+                      printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$failure_list_file"
+                      echo "::error::Failed to push latest tag $latest_image_ref from $dockerfile"
+                    fi
+                  else
+                    printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$failure_list_file"
+                    echo "::error::Failed to create latest tag $latest_image_ref from $full_image_ref for $dockerfile"
+                  fi
+                else
+                  echo "::warning::No derived latest image ref for $full_image_ref; skipping latest tag creation and push"
+                  printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$success_list_file"
+                  echo "::notice::Successfully built and pushed $full_image_ref from $dockerfile"
+                fi
               else
                 printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$failure_list_file"
                 echo "::error::Failed to push $full_image_ref from $dockerfile"

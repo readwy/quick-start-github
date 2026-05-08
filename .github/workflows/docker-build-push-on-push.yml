@@ -299,6 +299,16 @@ jobs:
             fi
           }
 
+          derive_latest_image_name() {
+            local resolved_image_name="$1"
+
+            if [[ "$resolved_image_name" != *:* ]]; then
+              return 0
+            fi
+
+            printf '%s:latest' "${resolved_image_name%:*}"
+          }
+
           echo "::group::Build and publish mode"
           printf 'ref=%s\n' "$WORKFLOW_REF"
           printf 'push_enabled=true\n'
@@ -311,19 +321,49 @@ jobs:
             fi
 
             full_image_name="${REGISTRY_URL}/${REGISTRY_NAMESPACE}/${resolved_image_name}"
+            latest_image_name="$(derive_latest_image_name "$resolved_image_name")"
+            if [[ -n "$latest_image_name" ]]; then
+              latest_image_name="${REGISTRY_URL}/${REGISTRY_NAMESPACE}/${latest_image_name}"
+            fi
             context_dir="$(dirname "$dockerfile")"
             echo "::group::Build and publish: $full_image_name"
             printf 'dockerfile=%s\n' "$dockerfile"
             printf 'resolved_image_name=%s\n' "$resolved_image_name"
+            printf 'latest_image_name=%s\n' "$latest_image_name"
             printf 'full_image_ref=%s\n' "$full_image_name"
+            if [[ -n "$latest_image_name" ]]; then
+              printf 'latest_image_ref=%s\n' "$latest_image_name"
+            else
+              printf 'latest_image_ref=%s\n' '(not-derived)'
+              echo "::warning::Skipping latest tag generation because resolved image name has no explicit tag: $resolved_image_name from $dockerfile"
+            fi
+            # latest_image_ref=%s
             printf 'build_context=%s\n' "$context_dir"
             printf 'ref=%s\n' "$WORKFLOW_REF"
             echo "::notice::Starting docker build for $dockerfile on $WORKFLOW_REF"
             if docker build -f "$dockerfile" -t "$full_image_name" "$context_dir"; then
               echo "::notice::Starting docker push for $full_image_name"
               if docker push "$full_image_name"; then
-                printf '%s\t%s\n' "$dockerfile" "$full_image_name" >> "$success_list_file"
-                echo "::notice::Successfully built and pushed $full_image_name from $dockerfile"
+                if [[ -n "$latest_image_name" ]]; then
+                  echo "::notice::Starting docker tag for latest image $latest_image_name"
+                  if docker tag "$full_image_name" "$latest_image_name"; then
+                    echo "::notice::Starting docker push for $latest_image_name"
+                    if docker push "$latest_image_name"; then
+                      printf '%s\t%s\n' "$dockerfile" "$full_image_name" >> "$success_list_file"
+                      echo "::notice::Successfully built and pushed $full_image_name from $dockerfile"
+                      echo "::notice::Successfully pushed latest tag $latest_image_name from $dockerfile"
+                    else
+                      printf '%s\t%s\tlatest push failed: %s\n' "$dockerfile" "$full_image_name" "$latest_image_name" >> "$failure_list_file"
+                      echo "::error::Failed to push latest tag $latest_image_name from $dockerfile"
+                    fi
+                  else
+                    printf '%s\t%s\tlatest tag creation failed: %s\n' "$dockerfile" "$full_image_name" "$latest_image_name" >> "$failure_list_file"
+                    echo "::error::Failed to create latest tag $latest_image_name from $full_image_name for $dockerfile"
+                  fi
+                else
+                  printf '%s\t%s\n' "$dockerfile" "$full_image_name" >> "$success_list_file"
+                  echo "::notice::Successfully built and pushed $full_image_name from $dockerfile"
+                fi
               else
                 printf '%s\t%s\n' "$dockerfile" "$full_image_name" >> "$failure_list_file"
                 echo "::error::Failed to push $full_image_name from $dockerfile"
