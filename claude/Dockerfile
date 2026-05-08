@@ -5,7 +5,7 @@ ENV TZ="Asia/Shanghai"
 ENV HOSTNAME=claude
 
 RUN DEBIAN_FRONTEND=noninteractive && \
-    apt update && apt install -y curl wget python3-dev build-essential xz-utils git && rm -rf /var/lib/apt/lists/* && \
+    apt update && apt install -y curl wget jq python3-dev build-essential xz-utils git && rm -rf /var/lib/apt/lists/* && \
     curl -o /tmp/node-v24.15.0-linux-x64.tar.xz https://nodejs.org/dist/v24.15.0/node-v24.15.0-linux-x64.tar.xz && \
     curl -o /tmp/node-v22.22.2-linux-x64.tar.xz https://nodejs.org/dist/v22.22.2/node-v22.22.2-linux-x64.tar.xz && \
     curl -o /tmp/node-v20.20.2-linux-x64.tar.xz https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-x64.tar.xz && \
@@ -67,7 +67,14 @@ RUN . /etc/profile && \
     npx skills add https://github.com/anthropics/skills --skill skill-creator -y -g && \
     npx skills add https://github.com/nextlevelbuilder/ui-ux-pro-max-skill --skill ui-ux-pro-max -y -g && \
     npx skills add https://github.com/tanweai/pua --skill pua -y -g && \
-    npx skills add https://github.com/anthropics/skills --skill frontend-design -y -g
+    npx skills add https://github.com/anthropics/skills --skill frontend-design -y -g &&  \
+    jq '.hasCompletedOnboarding = true' /home/dev/.claude.json > /tmp/.claude.json && mv /tmp/.claude.json /home/dev/.claude.json && \
+    jq '.env=(.env//{})|.env.ANTHROPIC_AUTH_TOKEN="ANTHROPIC_AUTH_TOKEN_PLACEHOLDER"|.env.ANTHROPIC_BASE_URL="ANTHROPIC_BASE_URL_PLACEHOLDER"|.env.HAIKU_MODEL="HAIKU_MODEL_PLACEHOLDER"|.env.OPUS_MODEL="OPUS_MODEL_PLACEHOLDER"|.env.SONNET_MODEL="SONNET_MODEL_PLACEHOLDER"' /home/dev/.claude/settings.json > /tmp/settings.json && mv /tmp/settings.json /home/dev/.claude/settings.json && \
+    sed -i "s|ANTHROPIC_AUTH_TOKEN_PLACEHOLDER|"$ANTHROPIC_AUTH_TOKEN"|g" /home/dev/.claude/settings.json && \
+    sed -i "s|ANTHROPIC_BASE_URL_PLACEHOLDER|"$ANTHROPIC_BASE_URL"|g" /home/dev/.claude/settings.json && \
+    sed -i "s|HAIKU_MODEL_PLACEHOLDER|"$HAIKU_MODEL"|g" /home/dev/.claude/settings.json && \
+    sed -i "s|OPUS_MODEL_PLACEHOLDER|"$OPUS_MODEL"|g" /home/dev/.claude/settings.json && \
+    sed -i "s|SONNET_MODEL_PLACEHOLDER|"$SONNET_MODEL"|g" /home/dev/.claude/settings.json
 
 # image_name: claude:v$(date "+%Y%m%d%H%M%S")
 # docker build --tag registry.cn-hangzhou.aliyuncs.com/cases/claude:$(date "+%Y%m%d%H%M%S") .
