@@ -62,7 +62,7 @@ RUN . /etc/profile && claude plugin install everything-claude-code@everything-cl
 RUN . /etc/profile && claude plugin install document-skills@anthropic-agent-skills
 RUN . /etc/profile && npx skills add google/skills -g -y
 RUN . /etc/profile && npx skills add https://github.com/vercel-labs/agent-browser --skill agent-browser -g -y
-RUN . /etc/profile && agent-browser skills get core --full
+RUN #. /etc/profile && agent-browser skills get core --full
 RUN . /etc/profile && npx skills add https://github.com/vercel-labs/skills --skill find-skills -g -y
 RUN . /etc/profile && npx skills add https://github.com/anthropics/skills --skill skill-creator -g -y
 RUN . /etc/profile && npx skills add https://github.com/nextlevelbuilder/ui-ux-pro-max-skill --skill ui-ux-pro-max -g -y
