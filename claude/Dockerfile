@@ -60,14 +60,14 @@ RUN . /etc/profile && \
     claude plugin install superpowers@superpowers-marketplace && \
     claude plugin install everything-claude-code@everything-claude-code && \
     claude plugin install document-skills@anthropic-agent-skills && \
-    npx skills add google/skills -y -g && \
-    npx skills add https://github.com/vercel-labs/agent-browser --skill agent-browser -y -g && \
+    npx skills add google/skills -g -y && \
+    npx skills add https://github.com/vercel-labs/agent-browser --skill agent-browser -g -y && \
     agent-browser skills get core --full && \
-    npx skills add https://github.com/vercel-labs/skills --skill find-skills -y -g && \
-    npx skills add https://github.com/anthropics/skills --skill skill-creator -y -g && \
-    npx skills add https://github.com/nextlevelbuilder/ui-ux-pro-max-skill --skill ui-ux-pro-max -y -g && \
-    npx skills add https://github.com/tanweai/pua --skill pua -y -g && \
-    npx skills add https://github.com/anthropics/skills --skill frontend-design -y -g &&  \
+    npx skills add https://github.com/vercel-labs/skills --skill find-skills -g -y && \
+    npx skills add https://github.com/anthropics/skills --skill skill-creator -g -y && \
+    npx skills add https://github.com/nextlevelbuilder/ui-ux-pro-max-skill --skill ui-ux-pro-max -g -y && \
+    npx skills add https://github.com/tanweai/pua --skill pua -g -y && \
+    npx skills add https://github.com/anthropics/skills --skill frontend-design -g -y &&  \
     jq '.hasCompletedOnboarding = true' /home/dev/.claude.json > /tmp/.claude.json && mv /tmp/.claude.json /home/dev/.claude.json && \
     jq '.env=(.env//{})|.env.ANTHROPIC_AUTH_TOKEN="ANTHROPIC_AUTH_TOKEN_PLACEHOLDER"|.env.ANTHROPIC_BASE_URL="ANTHROPIC_BASE_URL_PLACEHOLDER"|.env.HAIKU_MODEL="HAIKU_MODEL_PLACEHOLDER"|.env.OPUS_MODEL="OPUS_MODEL_PLACEHOLDER"|.env.SONNET_MODEL="SONNET_MODEL_PLACEHOLDER"' /home/dev/.claude/settings.json > /tmp/settings.json && mv /tmp/settings.json /home/dev/.claude/settings.json && \
     sed -i "s|ANTHROPIC_AUTH_TOKEN_PLACEHOLDER|"$CLAUDE_ANTHROPIC_AUTH_TOKEN"|g" /home/dev/.claude/settings.json && \
