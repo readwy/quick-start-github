@@ -1,0 +1,393 @@
+name: docker-build-push-on-push
+
+on:
+  workflow_dispatch:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-build-push-on-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Discover Dockerfiles and resolve image names
+        id: filter
+        shell: bash
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+
+          image_list_file="$RUNNER_TEMP/docker-image-list.tsv"
+          changed_entries_file="$RUNNER_TEMP/changed-paths.tsv"
+          fallback_entries_file="$RUNNER_TEMP/fallback-changed-paths.tsv"
+          discovered_list_file="$RUNNER_TEMP/discovered-dockerfiles.txt"
+          selected_list_file="$RUNNER_TEMP/selected-dockerfiles.txt"
+          skipped_list_file="$RUNNER_TEMP/skipped-dockerfiles.txt"
+          removed_list_file="$RUNNER_TEMP/removed-dockerfiles.txt"
+          ignored_list_file="$RUNNER_TEMP/ignored-paths.txt"
+
+          : > "$image_list_file"
+          : > "$changed_entries_file"
+          : > "$fallback_entries_file"
+          : > "$discovered_list_file"
+          : > "$selected_list_file"
+          : > "$skipped_list_file"
+          : > "$removed_list_file"
+          : > "$ignored_list_file"
+
+          print_entries() {
+            local file="$1"
+            if [[ -s "$file" ]]; then
+              while IFS= read -r line; do
+                printf '%s\n' "$line"
+              done < "$file"
+            else
+              printf '(none)\n'
+            fi
+          }
+
+          resolve_image_name() {
+            local raw_image_name="$1"
+            local resolved_image_name="$raw_image_name"
+            local supported_date_expansion='$(date "+%Y%m%d%H%M%S")'
+            local timestamp
+
+            if [[ "$resolved_image_name" == *"$supported_date_expansion"* ]]; then
+              timestamp="$(date "+%Y%m%d%H%M%S")"
+              resolved_image_name="${resolved_image_name//"$supported_date_expansion"/$timestamp}"
+            fi
+
+            if [[ "$resolved_image_name" == *'$('* || "$resolved_image_name" == *'`'* || "$resolved_image_name" == *'$'* ]]; then
+              >&2 echo "::error::Unsupported shell expansion in # image_name: $raw_image_name"
+              return 1
+            fi
+
+            if [[ ! "$resolved_image_name" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(\/[a-z0-9]+([._-][a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$ ]]; then
+              >&2 echo "::error::Resolved image name is invalid for Docker naming rules: $resolved_image_name"
+              return 1
+            fi
+
+            printf '%s' "$resolved_image_name"
+          }
+
+          echo "::group::Trigger context"
+          printf 'workflow=%s\n' "$WORKFLOW_NAME"
+          printf 'mode=push-scope\n'
+          printf 'event_name=%s\n' "$EVENT_NAME"
+          printf 'ref=%s\n' "$WORKFLOW_REF"
+          printf 'event_before=%s\n' "${EVENT_BEFORE:-}"
+          printf 'event_sha=%s\n' "${EVENT_SHA:-}"
+          echo "::endgroup::"
+
+          echo "::group::Changed path discovery"
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            use_git_diff=false
+            if [[ -n "${EVENT_BEFORE:-}" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]] \
+              && git cat-file -e "$EVENT_BEFORE^{commit}" >/dev/null 2>&1 \
+              && git cat-file -e "$EVENT_SHA^{commit}" >/dev/null 2>&1; then
+              if git diff --name-status "$EVENT_BEFORE" "$EVENT_SHA" > "$changed_entries_file"; then
+                use_git_diff=true
+                echo "::notice::Collected changed paths from git diff --name-status between push commits."
+              fi
+            fi
+
+            if [[ "$use_git_diff" != "true" ]]; then
+              echo "::warning::Falling back to event payload parsing for push change discovery."
+              jq -r '
+                [
+                  (.commits[]? | .added[]? | ["A", .]),
+                  (.commits[]? | .modified[]? | ["M", .]),
+                  (.commits[]? | .removed[]? | ["D", .])
+                ]
+                | map(select(.[1] != null))
+                | .[]
+                | @tsv
+              ' "$GITHUB_EVENT_PATH" > "$fallback_entries_file"
+
+              if [[ -s "$fallback_entries_file" ]]; then
+                awk -F '\t' '!seen[$2]++ { print $2 }' "$fallback_entries_file" | while IFS= read -r effective_path; do
+                  if [[ -z "$effective_path" ]]; then
+                    continue
+                  fi
+
+                  if [[ -e "$effective_path" ]]; then
+                    printf 'M\t%s\n' "$effective_path"
+                  else
+                    printf 'D\t%s\n' "$effective_path"
+                  fi
+                done > "$changed_entries_file"
+                if [[ -s "$changed_entries_file" ]]; then
+                  echo "::notice::Normalized fallback change entries to one effective path state per checkout path."
+                else
+                  echo "::warning::Event payload parsing produced no usable changed paths after normalization."
+                fi
+              else
+                echo "::warning::Event payload parsing produced no usable changed paths."
+              fi
+
+              if [[ ! -s "$changed_entries_file" ]]; then
+                echo "::warning::Falling back from event payload parsing to checked-out commit diff for deterministic push change discovery."
+                if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+                  echo "::notice::Collecting push changes from checked-out commit diff HEAD^..HEAD."
+                  git diff --name-status HEAD^ HEAD > "$changed_entries_file"
+                else
+                  echo "::warning::HEAD has no parent commit; collecting push changes from checked-out root diff."
+                  git diff-tree --root --no-commit-id --name-status -r HEAD > "$changed_entries_file"
+                fi
+              fi
+            fi
+          elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            echo "::notice::Collecting workflow_dispatch changes from HEAD^..HEAD."
+            git diff --name-status HEAD^ HEAD > "$changed_entries_file"
+          else
+            echo "::warning::HEAD has no parent commit; falling back to root diff for workflow_dispatch."
+            git diff-tree --root --no-commit-id --name-status -r HEAD > "$changed_entries_file"
+          fi
+
+          if [[ -s "$changed_entries_file" ]]; then
+            while IFS= read -r line; do
+              printf '%s\n' "$line"
+            done < "$changed_entries_file"
+          else
+            echo "::notice::No changed paths were detected for this trigger."
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Filter changed paths"
+          while IFS=$'\t' read -r status path extra; do
+            if [[ -z "${status:-}" || -z "${path:-}" ]]; then
+              continue
+            fi
+
+            if [[ "$status" == R* || "$status" == C* ]]; then
+              path="${extra:-$path}"
+            fi
+
+            base_name="$(basename "$path")"
+            if [[ "$base_name" != "Dockerfile" ]]; then
+              printf '%s\t%s\n' "$status" "$path" >> "$ignored_list_file"
+              echo "::notice::Ignoring non-Dockerfile path ($status): $path"
+              continue
+            fi
+
+            if [[ "$status" == "D" ]]; then
+              printf '%s\n' "$path" >> "$removed_list_file"
+              printf '%s\n' "$path" >> "$skipped_list_file"
+              echo "::warning::Dockerfile was removed and will not be built: $path"
+              continue
+            fi
+
+            if [[ ! -f "$path" ]]; then
+              printf '%s\n' "$path" >> "$skipped_list_file"
+              echo "::warning::Dockerfile path does not exist in checkout and will be skipped: $path"
+              continue
+            fi
+
+            printf '%s\n' "$path" >> "$discovered_list_file"
+
+            image_line="$(grep -m1 -E '^# image_name:' "$path" || true)"
+            if [[ -z "$image_line" ]]; then
+              printf '%s\n' "$path" >> "$skipped_list_file"
+              echo "::warning::Skipping Dockerfile without # image_name: $path"
+              continue
+            fi
+
+            raw_image_name="${image_line#\# image_name: }"
+            resolved_image_name="$(resolve_image_name "$raw_image_name")"
+            if [[ -z "$resolved_image_name" ]]; then
+              echo "::error::Resolved image name is empty for $path"
+              exit 1
+            fi
+
+            printf '%s\t%s\n' "$path" "$resolved_image_name" >> "$image_list_file"
+            printf '%s\t%s\n' "$path" "$resolved_image_name" >> "$selected_list_file"
+            echo "::notice::Selected Dockerfile for build: $path -> $resolved_image_name"
+          done < "$changed_entries_file"
+          echo "::endgroup::"
+
+          discovered_count="$(wc -l < "$discovered_list_file" | tr -d ' ')"
+          selected_count="$(wc -l < "$selected_list_file" | tr -d ' ')"
+          skipped_count="$(wc -l < "$skipped_list_file" | tr -d ' ')"
+          removed_count="$(wc -l < "$removed_list_file" | tr -d ' ')"
+          ignored_count="$(wc -l < "$ignored_list_file" | tr -d ' ')"
+
+          echo "::group::Discovery summary"
+          printf 'discovered_dockerfiles=%s\n' "$discovered_count"
+          printf 'selected_dockerfiles=%s\n' "$selected_count"
+          printf 'skipped_dockerfiles=%s\n' "$skipped_count"
+          printf 'removed_dockerfiles=%s\n' "$removed_count"
+          printf 'ignored_non_dockerfiles=%s\n' "$ignored_count"
+          echo 'selected_entries:'
+          print_entries "$selected_list_file"
+          echo 'removed_entries:'
+          print_entries "$removed_list_file"
+          echo 'ignored_entries:'
+          print_entries "$ignored_list_file"
+          echo 'skipped_entries:'
+          print_entries "$skipped_list_file"
+          echo "::endgroup::"
+
+          printf 'image_list_file=%s\n' "$image_list_file" >> "$GITHUB_OUTPUT"
+          printf 'discovered_dockerfiles=%s\n' "$discovered_count" >> "$GITHUB_OUTPUT"
+          printf 'selected_dockerfiles=%s\n' "$selected_count" >> "$GITHUB_OUTPUT"
+          printf 'selected_list_file=%s\n' "$selected_list_file" >> "$GITHUB_OUTPUT"
+          printf 'skipped_dockerfiles=%s\n' "$skipped_count" >> "$GITHUB_OUTPUT"
+          printf 'skipped_list_file=%s\n' "$skipped_list_file" >> "$GITHUB_OUTPUT"
+          if [[ -s "$image_list_file" ]]; then
+            printf 'has_images=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'has_images=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to registry
+        if: ${{ steps.filter.outputs.has_images == 'true' }}
+        shell: bash
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY_URL" -u "$REGISTRY_USER" --password-stdin
+
+      - name: Build and push images
+        if: ${{ steps.filter.outputs.has_images == 'true' }}
+        shell: bash
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
+          IMAGE_LIST_FILE: ${{ steps.filter.outputs.image_list_file }}
+          DISCOVERED_DOCKERFILES: ${{ steps.filter.outputs.discovered_dockerfiles }}
+          SELECTED_DOCKERFILES: ${{ steps.filter.outputs.selected_dockerfiles }}
+          SELECTED_LIST_FILE: ${{ steps.filter.outputs.selected_list_file }}
+          SKIPPED_DOCKERFILES: ${{ steps.filter.outputs.skipped_dockerfiles }}
+          SKIPPED_LIST_FILE: ${{ steps.filter.outputs.skipped_list_file }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+
+          success_list_file="$RUNNER_TEMP/successful-images.txt"
+          failure_list_file="$RUNNER_TEMP/failed-images.txt"
+
+          : > "$success_list_file"
+          : > "$failure_list_file"
+
+          print_entries() {
+            local file="$1"
+            if [[ -s "$file" ]]; then
+              while IFS= read -r line; do
+                printf '%s\n' "$line"
+              done < "$file"
+            else
+              printf '(none)\n'
+            fi
+          }
+
+          echo "::group::Build and publish mode"
+          printf 'ref=%s\n' "$WORKFLOW_REF"
+          printf 'push_enabled=true\n'
+          echo "::endgroup::"
+
+          echo "::group::Build and publish operations"
+          while IFS=$'\t' read -r dockerfile resolved_image_name; do
+            if [[ -z "${dockerfile:-}" || -z "${resolved_image_name:-}" ]]; then
+              continue
+            fi
+
+            full_image_name="${REGISTRY_URL}/${REGISTRY_NAMESPACE}/${resolved_image_name}"
+            context_dir="$(dirname "$dockerfile")"
+            echo "::group::Build and publish: $full_image_name"
+            printf 'dockerfile=%s\n' "$dockerfile"
+            printf 'resolved_image_name=%s\n' "$resolved_image_name"
+            printf 'full_image_ref=%s\n' "$full_image_name"
+            printf 'build_context=%s\n' "$context_dir"
+            printf 'ref=%s\n' "$WORKFLOW_REF"
+            echo "::notice::Starting docker build for $dockerfile on $WORKFLOW_REF"
+            if docker build -f "$dockerfile" -t "$full_image_name" "$context_dir"; then
+              echo "::notice::Starting docker push for $full_image_name"
+              if docker push "$full_image_name"; then
+                printf '%s\t%s\n' "$dockerfile" "$full_image_name" >> "$success_list_file"
+                echo "::notice::Successfully built and pushed $full_image_name from $dockerfile"
+              else
+                printf '%s\t%s\n' "$dockerfile" "$full_image_name" >> "$failure_list_file"
+                echo "::error::Failed to push $full_image_name from $dockerfile"
+              fi
+            else
+              printf '%s\t%s\n' "$dockerfile" "$full_image_name" >> "$failure_list_file"
+              echo "::error::Failed to build $full_image_name from $dockerfile"
+            fi
+            echo "::endgroup::"
+          done < "$IMAGE_LIST_FILE"
+          echo "::endgroup::"
+
+          successful_count="$(wc -l < "$success_list_file" | tr -d ' ')"
+          failed_count="$(wc -l < "$failure_list_file" | tr -d ' ')"
+
+          echo "::group::Final build summary"
+          printf 'ref=%s\n' "$WORKFLOW_REF"
+          printf 'push_enabled=true\n'
+          printf 'discovered_dockerfiles=%s\n' "$DISCOVERED_DOCKERFILES"
+          printf 'selected_dockerfiles=%s\n' "$SELECTED_DOCKERFILES"
+          printf 'successful_images=%s\n' "$successful_count"
+          printf 'skipped_dockerfiles=%s\n' "$SKIPPED_DOCKERFILES"
+          printf 'failed_images=%s\n' "$failed_count"
+          echo 'selected_entries:'
+          print_entries "$SELECTED_LIST_FILE"
+          echo 'success_entries:'
+          print_entries "$success_list_file"
+          echo 'skipped_entries:'
+          print_entries "$SKIPPED_LIST_FILE"
+          echo 'failure_entries:'
+          print_entries "$failure_list_file"
+          echo "::endgroup::"
+
+          if [[ "$failed_count" -gt 0 ]]; then
+            exit 1
+          fi
+
+      - name: Log no-op summary
+        if: ${{ steps.filter.outputs.has_images != 'true' }}
+        shell: bash
+        env:
+          DISCOVERED_DOCKERFILES: ${{ steps.filter.outputs.discovered_dockerfiles }}
+          SELECTED_DOCKERFILES: ${{ steps.filter.outputs.selected_dockerfiles }}
+          SKIPPED_DOCKERFILES: ${{ steps.filter.outputs.skipped_dockerfiles }}
+          SKIPPED_LIST_FILE: ${{ steps.filter.outputs.skipped_list_file }}
+        run: |
+          set -euo pipefail
+
+          print_entries() {
+            local file="$1"
+            if [[ -s "$file" ]]; then
+              while IFS= read -r line; do
+                printf '%s\n' "$line"
+              done < "$file"
+            else
+              printf '(none)\n'
+            fi
+          }
+
+          echo "::notice::No buildable Dockerfiles were selected for this run."
+          echo "::group::No-op summary"
+          printf 'discovered_dockerfiles=%s\n' "$DISCOVERED_DOCKERFILES"
+          printf 'selected_dockerfiles=%s\n' "$SELECTED_DOCKERFILES"
+          printf 'successful_images=0\n'
+          printf 'skipped_dockerfiles=%s\n' "$SKIPPED_DOCKERFILES"
+          printf 'failed_images=0\n'
+          echo 'success_entries:'
+          echo '(none)'
+          echo 'skipped_entries:'
+          print_entries "$SKIPPED_LIST_FILE"
+          echo 'failure_entries:'
+          echo '(none)'
+          echo "::endgroup::"

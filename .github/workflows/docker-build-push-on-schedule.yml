@@ -1,0 +1,325 @@
+name: docker-build-push-on-schedule
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 2 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  docker-build-push-on-schedule:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Discover Dockerfiles and resolve image names
+        id: filter
+        shell: bash
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          DEFAULT_REGISTRY_URL: docker.io
+        run: |
+          set -euo pipefail
+
+          image_list_file="$RUNNER_TEMP/docker-image-list.tsv"
+          raw_scan_file="$RUNNER_TEMP/raw-dockerfiles.txt"
+          discovered_list_file="$RUNNER_TEMP/discovered-dockerfiles.txt"
+          selected_list_file="$RUNNER_TEMP/selected-dockerfiles.txt"
+          skipped_list_file="$RUNNER_TEMP/skipped-dockerfiles.txt"
+
+          : > "$image_list_file"
+          : > "$raw_scan_file"
+          : > "$discovered_list_file"
+          : > "$selected_list_file"
+          : > "$skipped_list_file"
+
+          print_entries() {
+            local file="$1"
+            if [[ -s "$file" ]]; then
+              while IFS= read -r line; do
+                printf '%s\n' "$line"
+              done < "$file"
+            else
+              printf '(none)\n'
+            fi
+          }
+
+          resolve_image_name() {
+            local raw_image_name="$1"
+            local resolved_image_name="$raw_image_name"
+            local supported_date_expansion='$(date "+%Y%m%d%H%M%S")'
+            local timestamp
+
+            if [[ "$resolved_image_name" == *"$supported_date_expansion"* ]]; then
+              timestamp="$(date "+%Y%m%d%H%M%S")"
+              resolved_image_name="${resolved_image_name//"$supported_date_expansion"/$timestamp}"
+            fi
+
+            if [[ "$resolved_image_name" == *'$('* || "$resolved_image_name" == *'`'* || "$resolved_image_name" == *'$'* ]]; then
+              >&2 echo "::error::Unsupported shell expansion in # image_name: $raw_image_name"
+              return 1
+            fi
+
+            if [[ ! "$resolved_image_name" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(\/[a-z0-9]+([._-][a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$ ]]; then
+              >&2 echo "::error::Resolved image name is invalid for Docker naming rules: $resolved_image_name"
+              return 1
+            fi
+
+            printf '%s' "$resolved_image_name"
+          }
+
+          echo "::group::Trigger context"
+          printf 'workflow=%s\n' "${WORKFLOW_NAME:-}"
+          printf 'mode=full-scan\n'
+          printf 'event_name=%s\n' "${EVENT_NAME:-}"
+          printf 'ref=%s\n' "${WORKFLOW_REF:-}"
+          echo "::endgroup::"
+
+          echo "::group::Raw Dockerfile scan"
+          find . -type f -name Dockerfile | LC_ALL=C sort > "$raw_scan_file"
+          print_entries "$raw_scan_file"
+          echo "::endgroup::"
+
+          while IFS= read -r dockerfile; do
+            if [[ -z "$dockerfile" ]]; then
+              continue
+            fi
+
+            printf '%s\n' "$dockerfile" >> "$discovered_list_file"
+
+            image_line="$(grep -m1 -E '^# image_name:' "$dockerfile" || true)"
+            if [[ -z "$image_line" ]]; then
+              printf '%s\n' "$dockerfile" >> "$skipped_list_file"
+              echo "::warning::Skipping Dockerfile without # image_name: $dockerfile"
+              continue
+            fi
+
+            raw_image_name="${image_line#\# image_name: }"
+            resolved_image_name="$(resolve_image_name "$raw_image_name")"
+            if [[ -z "$resolved_image_name" ]]; then
+              echo "::error::Resolved image name is empty for $dockerfile"
+              exit 1
+            fi
+
+            registry_host="${resolved_image_name%%/*}"
+            if [[ "$resolved_image_name" != */* ]] || [[ "$registry_host" != *.* && "$registry_host" != *:* && "$registry_host" != "localhost" ]]; then
+              full_image_ref="${DEFAULT_REGISTRY_URL}/${resolved_image_name}"
+            else
+              full_image_ref="$resolved_image_name"
+            fi
+
+            printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$image_list_file"
+            printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$selected_list_file"
+          done < "$raw_scan_file"
+
+          discovered_count="$(wc -l < "$discovered_list_file" | tr -d ' ')"
+          selected_count="$(wc -l < "$selected_list_file" | tr -d ' ')"
+          skipped_count="$(wc -l < "$skipped_list_file" | tr -d ' ')"
+
+          echo "::group::Filtered Dockerfiles"
+          print_entries "$selected_list_file"
+          echo "::endgroup::"
+
+          echo "::group::Skipped Dockerfiles"
+          print_entries "$skipped_list_file"
+          echo "::endgroup::"
+
+          echo "::group::Discovery summary"
+          printf 'discovered_dockerfiles=%s\n' "$discovered_count"
+          printf 'selected_dockerfiles=%s\n' "$selected_count"
+          printf 'skipped_dockerfiles=%s\n' "$skipped_count"
+          echo "::endgroup::"
+
+          printf 'image_list_file=%s\n' "$image_list_file" >> "$GITHUB_OUTPUT"
+          printf 'discovered_dockerfiles=%s\n' "$discovered_count" >> "$GITHUB_OUTPUT"
+          printf 'selected_dockerfiles=%s\n' "$selected_count" >> "$GITHUB_OUTPUT"
+          printf 'selected_list_file=%s\n' "$selected_list_file" >> "$GITHUB_OUTPUT"
+          printf 'skipped_dockerfiles=%s\n' "$skipped_count" >> "$GITHUB_OUTPUT"
+          printf 'skipped_list_file=%s\n' "$skipped_list_file" >> "$GITHUB_OUTPUT"
+          if [[ -s "$image_list_file" ]]; then
+            printf 'has_images=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'has_images=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare publish image refs
+        if: ${{ steps.filter.outputs.has_images == 'true' }}
+        id: prepare
+        shell: bash
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
+          IMAGE_LIST_FILE: ${{ steps.filter.outputs.image_list_file }}
+        run: |
+          set -euo pipefail
+
+          publish_image_list_file="$RUNNER_TEMP/publish-image-list.tsv"
+          : > "$publish_image_list_file"
+
+          echo "::group::Prepare publish manifest"
+          while IFS=$'\t' read -r dockerfile discovered_image_ref; do
+            if [[ -z "${dockerfile:-}" || -z "${discovered_image_ref:-}" ]]; then
+              continue
+            fi
+
+            image_name_without_registry="$discovered_image_ref"
+            if [[ "$discovered_image_ref" == */* ]]; then
+              registry_host="${discovered_image_ref%%/*}"
+              if [[ "$registry_host" == *.* || "$registry_host" == *:* || "$registry_host" == "localhost" ]]; then
+                image_name_without_registry="${discovered_image_ref#*/}"
+              fi
+            fi
+
+            full_image_ref="${REGISTRY_URL}/${REGISTRY_NAMESPACE}/${image_name_without_registry}"
+            printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$publish_image_list_file"
+            printf 'dockerfile=%s\n' "$dockerfile"
+            printf 'discovered_image_ref=%s\n' "$discovered_image_ref"
+            printf 'publish_image_ref=%s\n' "$full_image_ref"
+          done < "$IMAGE_LIST_FILE"
+          echo "::endgroup::"
+
+          printf 'publish_image_list_file=%s\n' "$publish_image_list_file" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to registry
+        if: ${{ steps.filter.outputs.has_images == 'true' }}
+        shell: bash
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY_URL" -u "$REGISTRY_USER" --password-stdin
+
+      - name: Build and push images
+        if: ${{ steps.filter.outputs.has_images == 'true' }}
+        shell: bash
+        env:
+          IMAGE_LIST_FILE: ${{ steps.prepare.outputs.publish_image_list_file }}
+          DISCOVERED_DOCKERFILES: ${{ steps.filter.outputs.discovered_dockerfiles }}
+          SELECTED_DOCKERFILES: ${{ steps.filter.outputs.selected_dockerfiles }}
+          SELECTED_LIST_FILE: ${{ steps.filter.outputs.selected_list_file }}
+          SKIPPED_DOCKERFILES: ${{ steps.filter.outputs.skipped_dockerfiles }}
+          SKIPPED_LIST_FILE: ${{ steps.filter.outputs.skipped_list_file }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+
+          success_list_file="$RUNNER_TEMP/successful-images.txt"
+          failure_list_file="$RUNNER_TEMP/failed-images.txt"
+          : > "$success_list_file"
+          : > "$failure_list_file"
+
+          print_entries() {
+            local file="$1"
+            if [[ -s "$file" ]]; then
+              while IFS= read -r line; do
+                printf '%s\n' "$line"
+              done < "$file"
+            else
+              printf '(none)\n'
+            fi
+          }
+
+          echo "::group::Build and publish mode"
+          printf 'ref=%s\n' "$WORKFLOW_REF"
+          printf 'push_enabled=true\n'
+          echo "::endgroup::"
+
+          echo "::group::Build and push operations"
+          while IFS=$'\t' read -r dockerfile full_image_ref; do
+            if [[ -z "${dockerfile:-}" || -z "${full_image_ref:-}" ]]; then
+              continue
+            fi
+
+            context_dir="$(dirname "$dockerfile")"
+            echo "::group::Build and push: $full_image_ref"
+            printf 'dockerfile=%s\n' "$dockerfile"
+            printf 'full_image_ref=%s\n' "$full_image_ref"
+            printf 'build_context=%s\n' "$context_dir"
+            printf 'ref=%s\n' "$WORKFLOW_REF"
+            echo "::notice::Starting docker build for $dockerfile on $WORKFLOW_REF"
+            if docker build -f "$dockerfile" -t "$full_image_ref" "$context_dir"; then
+              echo "::notice::Starting docker push for $full_image_ref"
+              if docker push "$full_image_ref"; then
+                printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$success_list_file"
+                echo "::notice::Successfully built and pushed $full_image_ref from $dockerfile"
+              else
+                printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$failure_list_file"
+                echo "::error::Failed to push $full_image_ref from $dockerfile"
+              fi
+            else
+              printf '%s\t%s\n' "$dockerfile" "$full_image_ref" >> "$failure_list_file"
+              echo "::error::Failed to build $full_image_ref from $dockerfile"
+            fi
+            echo "::endgroup::"
+          done < "$IMAGE_LIST_FILE"
+          echo "::endgroup::"
+
+          successful_count="$(wc -l < "$success_list_file" | tr -d ' ')"
+          failed_count="$(wc -l < "$failure_list_file" | tr -d ' ')"
+
+          echo "::group::Final build summary"
+          printf 'ref=%s\n' "$WORKFLOW_REF"
+          printf 'push_enabled=true\n'
+          printf 'discovered_dockerfiles=%s\n' "$DISCOVERED_DOCKERFILES"
+          printf 'selected_dockerfiles=%s\n' "$SELECTED_DOCKERFILES"
+          printf 'successful_images=%s\n' "$successful_count"
+          printf 'skipped_dockerfiles=%s\n' "$SKIPPED_DOCKERFILES"
+          printf 'failed_images=%s\n' "$failed_count"
+          echo 'selected_entries:'
+          print_entries "$SELECTED_LIST_FILE"
+          echo 'success_entries:'
+          print_entries "$success_list_file"
+          echo 'skipped_entries:'
+          print_entries "$SKIPPED_LIST_FILE"
+          echo 'failure_entries:'
+          print_entries "$failure_list_file"
+          echo "::endgroup::"
+
+          if [[ "$failed_count" -gt 0 ]]; then
+            exit 1
+          fi
+
+      - name: Log no-op summary
+        if: ${{ steps.filter.outputs.has_images != 'true' }}
+        shell: bash
+        env:
+          DISCOVERED_DOCKERFILES: ${{ steps.filter.outputs.discovered_dockerfiles }}
+          SELECTED_DOCKERFILES: ${{ steps.filter.outputs.selected_dockerfiles }}
+          SKIPPED_DOCKERFILES: ${{ steps.filter.outputs.skipped_dockerfiles }}
+          SKIPPED_LIST_FILE: ${{ steps.filter.outputs.skipped_list_file }}
+        run: |
+          set -euo pipefail
+
+          print_entries() {
+            local file="$1"
+            if [[ -s "$file" ]]; then
+              while IFS= read -r line; do
+                printf '%s\n' "$line"
+              done < "$file"
+            else
+              printf '(none)\n'
+            fi
+          }
+
+          echo "::notice::No buildable Dockerfiles were selected for this run."
+          echo "::group::No-op summary"
+          printf 'discovered_dockerfiles=%s\n' "$DISCOVERED_DOCKERFILES"
+          printf 'selected_dockerfiles=%s\n' "$SELECTED_DOCKERFILES"
+          printf 'successful_images=0\n'
+          printf 'skipped_dockerfiles=%s\n' "$SKIPPED_DOCKERFILES"
+          printf 'failed_images=0\n'
+          echo 'success_entries:'
+          echo '(none)'
+          echo 'skipped_entries:'
+          print_entries "$SKIPPED_LIST_FILE"
+          echo 'failure_entries:'
+          echo '(none)'
+          echo "::endgroup::"
