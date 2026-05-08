@@ -69,7 +69,7 @@ RUN . /etc/profile && npm config set registry https://registry.npmmirror.com && 
     npx skills add https://github.com/tanweai/pua --skill pua -y -g && \
     npx skills add https://github.com/anthropics/skills --skill frontend-design -y -g
 
-# image_name: claude:v-$(date "+%Y%m%d%H%M%S")
+# image_name: claude:v$(date "+%Y%m%d%H%M%S")
 # docker build --tag registry.cn-hangzhou.aliyuncs.com/cases/claude:$(date "+%Y%m%d%H%M%S") .
 # docker build --tag registry.cn-hangzhou.aliyuncs.com/cases/claude:20260430155304 .
 # touch /apps/claude/.claude.json
