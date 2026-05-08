@@ -9,9 +9,9 @@ RUN DEBIAN_FRONTEND=noninteractive && \
     curl -o /tmp/node-v24.15.0-linux-x64.tar.xz https://nodejs.org/dist/v24.15.0/node-v24.15.0-linux-x64.tar.xz && \
     curl -o /tmp/node-v22.22.2-linux-x64.tar.xz https://nodejs.org/dist/v22.22.2/node-v22.22.2-linux-x64.tar.xz && \
     curl -o /tmp/node-v20.20.2-linux-x64.tar.xz https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-x64.tar.xz && \
-    curl -o /tmp/OpenJDK8U-jdk_x64_linux_hotspot_8u492b09.tar.gz https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u492-b09/OpenJDK8U-jdk_x64_linux_hotspot_8u492b09.tar.gz && \
-    curl -o /tmp/OpenJDK11U-jdk_x64_linux_hotspot_11.0.31_11.tar.gz https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.31%2B11/OpenJDK11U-jdk_x64_linux_hotspot_11.0.31_11.tar.gz && \
-    curl -o /tmp/OpenJDK17U-jdk_x64_linux_hotspot_17.0.19_10.tar.gz https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.19%2B10/OpenJDK17U-jdk_x64_linux_hotspot_17.0.19_10.tar.gz && \
+    curl -L -A "Mozilla/5.0" -o /tmp/OpenJDK8U-jdk_x64_linux_hotspot_8u492b09.tar.gz https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u492-b09/OpenJDK8U-jdk_x64_linux_hotspot_8u492b09.tar.gz && \
+    curl -L -A "Mozilla/5.0" -o /tmp/OpenJDK11U-jdk_x64_linux_hotspot_11.0.31_11.tar.gz https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.31%2B11/OpenJDK11U-jdk_x64_linux_hotspot_11.0.31_11.tar.gz && \
+    curl -L -A "Mozilla/5.0" -o /tmp/OpenJDK17U-jdk_x64_linux_hotspot_17.0.19_10.tar.gz https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.19%2B10/OpenJDK17U-jdk_x64_linux_hotspot_17.0.19_10.tar.gz && \
     curl -o /tmp/OpenJDK21U-jdk_x64_linux_hotspot_21.0.11_10.tar.gz https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.11%2B10/OpenJDK21U-jdk_x64_linux_hotspot_21.0.11_10.tar.gz && \
     curl -o /tmp/apache-maven-3.6.3-bin.tar.gz https://archive.apache.org/dist/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.tar.gz && \
     curl -o /tmp/apache-maven-3.8.9-bin.tar.gz https://archive.apache.org/dist/maven/maven-3/3.8.9/binaries/apache-maven-3.8.9-bin.tar.gz && \
@@ -43,7 +43,7 @@ RUN DEBIAN_FRONTEND=noninteractive && \
     curl -o /etc/profile.d/java.sh https://pub-308fdf0fa2bd4610abe7059fb335eb69.r2.dev/claude/java.sh && \
     curl -o /etc/profile.d/maven.sh https://pub-308fdf0fa2bd4610abe7059fb335eb69.r2.dev/claude/maven.sh && \
     curl -o /etc/profile.d/node.sh https://pub-308fdf0fa2bd4610abe7059fb335eb69.r2.dev/claude/node.sh && \
-    . /etc/profile && npm config set registry https://registry.npmmirror.com && npm install -g @anthropic-ai/claude-code && \
+    . /etc/profile && npm install -g @anthropic-ai/claude-code && \
     npm install -g agent-browser && \
     agent-browser install --with-deps && \
     useradd -m dev -s /bin/bash && mkdir -p /home/dev/.claude && \
@@ -51,7 +51,7 @@ RUN DEBIAN_FRONTEND=noninteractive && \
 
 USER dev
 
-RUN . /etc/profile && npm config set registry https://registry.npmmirror.com && \
+RUN . /etc/profile && \
     claude plugin marketplace add forrestchang/andrej-karpathy-skills && \
     claude plugin marketplace add obra/superpowers-marketplace && \
     claude plugin marketplace add https://github.com/affaan-m/everything-claude-code && \
