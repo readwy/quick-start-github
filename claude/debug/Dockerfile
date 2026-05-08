@@ -4,7 +4,7 @@ ENV PS1="[\u@claude \W]# "
 ENV TZ="Asia/Shanghai"
 ENV HOSTNAME=claude
 
-RUN DEBIAN_FRONTEND=noninteractive && \
+RUN DEBIAN_FRONTEND=noninteractive
 RUN apt update && apt install -y curl wget jq python3-dev build-essential xz-utils git && rm -rf /var/lib/apt/lists/*
 RUN curl -o /tmp/node-v24.15.0-linux-x64.tar.xz https://nodejs.org/dist/v24.15.0/node-v24.15.0-linux-x64.tar.xz
 RUN curl -o /tmp/node-v22.22.2-linux-x64.tar.xz https://nodejs.org/dist/v22.22.2/node-v22.22.2-linux-x64.tar.xz
