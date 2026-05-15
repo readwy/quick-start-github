@@ -54,15 +54,14 @@ USER dev
 RUN . /etc/profile
 RUN . /etc/profile && claude plugin marketplace add forrestchang/andrej-karpathy-skills
 RUN . /etc/profile && claude plugin marketplace add obra/superpowers-marketplace
-RUN . /etc/profile && claude plugin marketplace add https://github.com/affaan-m/everything-claude-code
 RUN . /etc/profile && claude plugin marketplace add anthropics/skills
 RUN . /etc/profile && claude plugin install andrej-karpathy-skills@karpathy-skills
 RUN . /etc/profile && claude plugin install superpowers@superpowers-marketplace
-RUN . /etc/profile && claude plugin install everything-claude-code@everything-claude-code
 RUN . /etc/profile && claude plugin install document-skills@anthropic-agent-skills
 RUN . /etc/profile && npx skills add google/skills -g -y
 RUN . /etc/profile && npx skills add https://github.com/vercel-labs/agent-browser --skill agent-browser -g -y
 RUN . /etc/profile && agent-browser skills get core --full
+RUN . /etc/profile && npx skills add https://github.com/affaan-m/everything-claude-code --skill security-review -g -y
 RUN . /etc/profile && npx skills add https://github.com/vercel-labs/skills --skill find-skills -g -y
 RUN . /etc/profile && npx skills add https://github.com/anthropics/skills --skill skill-creator -g -y
 RUN . /etc/profile && npx skills add https://github.com/nextlevelbuilder/ui-ux-pro-max-skill --skill ui-ux-pro-max -g -y
