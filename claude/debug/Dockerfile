@@ -45,7 +45,7 @@ RUN curl -o /etc/profile.d/maven.sh https://pub-308fdf0fa2bd4610abe7059fb335eb69
 RUN curl -o /etc/profile.d/node.sh https://pub-308fdf0fa2bd4610abe7059fb335eb69.r2.dev/claude/node.sh
 RUN . /etc/profile && npm install -g @anthropic-ai/claude-code
 RUN . /etc/profile && npm install -g agent-browser
-RUN agent-browser install --with-deps
+RUN . /etc/profile && agent-browser install --with-deps
 RUN useradd -m dev -s /bin/bash && mkdir -p /home/dev/.claude
 RUN echo "source /etc/profile" >> /home/dev/.bashrc && chown -R dev: /home/dev
 
@@ -62,12 +62,12 @@ RUN . /etc/profile && claude plugin install everything-claude-code@everything-cl
 RUN . /etc/profile && claude plugin install document-skills@anthropic-agent-skills
 RUN . /etc/profile && npx skills add google/skills -g -y
 RUN . /etc/profile && npx skills add https://github.com/vercel-labs/agent-browser --skill agent-browser -g -y
-RUN #. /etc/profile && agent-browser skills get core --full
+RUN . /etc/profile && agent-browser skills get core --full
 RUN . /etc/profile && npx skills add https://github.com/vercel-labs/skills --skill find-skills -g -y
 RUN . /etc/profile && npx skills add https://github.com/anthropics/skills --skill skill-creator -g -y
 RUN . /etc/profile && npx skills add https://github.com/nextlevelbuilder/ui-ux-pro-max-skill --skill ui-ux-pro-max -g -y
 RUN . /etc/profile && npx skills add https://github.com/tanweai/pua --skill pua -g -y
-RUN . /etc/profile && npx skills add https://github.com/anthropics/skills --skill frontend-design -g -y &
+RUN . /etc/profile && npx skills add https://github.com/anthropics/skills --skill frontend-design -g -y &&  \
 RUN jq '.hasCompletedOnboarding = true' /home/dev/.claude.json > /tmp/.claude.json && mv /tmp/.claude.json /home/dev/.claude.json
 RUN jq '.env=(.env//{})|.env.ANTHROPIC_AUTH_TOKEN="ANTHROPIC_AUTH_TOKEN_PLACEHOLDER"|.env.ANTHROPIC_BASE_URL="ANTHROPIC_BASE_URL_PLACEHOLDER"|.env.HAIKU_MODEL="HAIKU_MODEL_PLACEHOLDER"|.env.OPUS_MODEL="OPUS_MODEL_PLACEHOLDER"|.env.SONNET_MODEL="SONNET_MODEL_PLACEHOLDER"' /home/dev/.claude/settings.json > /tmp/settings.json && mv /tmp/settings.json /home/dev/.claude/settings.json
 RUN sed -i "s|ANTHROPIC_AUTH_TOKEN_PLACEHOLDER|"$CLAUDE_ANTHROPIC_AUTH_TOKEN"|g" /home/dev/.claude/settings.json
@@ -76,9 +76,8 @@ RUN sed -i "s|HAIKU_MODEL_PLACEHOLDER|"$CLAUDE_HAIKU_MODEL"|g" /home/dev/.claude
 RUN sed -i "s|OPUS_MODEL_PLACEHOLDER|"$CLAUDE_OPUS_MODEL"|g" /home/dev/.claude/settings.json
 RUN sed -i "s|SONNET_MODEL_PLACEHOLDER|"$CLAUDE_SONNET_MODEL"|g" /home/dev/.claude/settings.json
 
-# image_name: claude1:v$(date "+%Y%m%d%H%M%S")
+# image_name: claude2:v$(date "+%Y%m%d%H%M%S")
 # docker build --tag registry.cn-hangzhou.aliyuncs.com/cases/claude:$(date "+%Y%m%d%H%M%S") .
-# docker build --tag registry.cn-hangzhou.aliyuncs.com/cases/claude:20260430155304 .
 # touch /apps/claude/.claude.json
 # touch /apps/claude/settings.json
 # mkdir -p /apps/claude/workspace
