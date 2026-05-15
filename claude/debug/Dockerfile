@@ -66,7 +66,7 @@ RUN . /etc/profile && npx skills add https://github.com/vercel-labs/skills --ski
 RUN . /etc/profile && npx skills add https://github.com/anthropics/skills --skill skill-creator -g -y
 RUN . /etc/profile && npx skills add https://github.com/nextlevelbuilder/ui-ux-pro-max-skill --skill ui-ux-pro-max -g -y
 RUN . /etc/profile && npx skills add https://github.com/tanweai/pua --skill pua -g -y
-RUN . /etc/profile && npx skills add https://github.com/anthropics/skills --skill frontend-design -g -y &&  \
+RUN . /etc/profile && npx skills add https://github.com/anthropics/skills --skill frontend-design -g -y
 RUN jq '.hasCompletedOnboarding = true' /home/dev/.claude.json > /tmp/.claude.json && mv /tmp/.claude.json /home/dev/.claude.json
 RUN jq '.env=(.env//{})|.env.ANTHROPIC_AUTH_TOKEN="ANTHROPIC_AUTH_TOKEN_PLACEHOLDER"|.env.ANTHROPIC_BASE_URL="ANTHROPIC_BASE_URL_PLACEHOLDER"|.env.HAIKU_MODEL="HAIKU_MODEL_PLACEHOLDER"|.env.OPUS_MODEL="OPUS_MODEL_PLACEHOLDER"|.env.SONNET_MODEL="SONNET_MODEL_PLACEHOLDER"' /home/dev/.claude/settings.json > /tmp/settings.json && mv /tmp/settings.json /home/dev/.claude/settings.json
 RUN sed -i "s|ANTHROPIC_AUTH_TOKEN_PLACEHOLDER|"$CLAUDE_ANTHROPIC_AUTH_TOKEN"|g" /home/dev/.claude/settings.json
