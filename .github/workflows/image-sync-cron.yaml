@@ -1,0 +1,56 @@
+name: images synchronization cron
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '00 01 * * *'
+
+jobs:
+
+  build:
+    name: Pull
+    runs-on: ubuntu-latest
+    steps:
+    - name: Record disk space before disk release
+      run: |
+        echo "disk space before disk release"
+        echo "----------------------------------------------------------------------------"
+        df -hT
+        echo "----------------------------------------------------------------------------"
+
+    # release some useless space
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@c28619d8999a147d5e09c1199f84ff6af6ad5794
+      with:
+        root-reserve-mb: 2048
+        swap-size-mb: 128
+        remove-dotnet: 'true'
+        remove-haskell: 'true'
+        # release more space by uncomment follow code
+        # remove-android: 'true'
+        # remove-codeql: 'true'
+        build-mount-path: '/var/lib/docker/'
+
+    - name: Restart docker
+      run: sudo service docker restart
+
+    - name: Record disk space after disk release complete
+      run: |
+        echo "disk space after disk release"
+        echo "----------------------------------------------------------------------------"
+        df -hT
+        echo "----------------------------------------------------------------------------"
+
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Docker Setup Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Sync image to custom registry
+      env:
+        REGISTRY_URL: "${{ secrets.REGISTRY_URL }}"
+        REGISTRY_NAMESPACE: "${{ secrets.REGISTRY_NAMESPACE }}"
+        REGISTRY_USER: "${{ secrets.REGISTRY_USER }}"
+        REGISTRY_PASSWORD: "${{ secrets.REGISTRY_PASSWORD }}"
+      run: bash ./.github/scripts/image-sync/sync-images.sh
