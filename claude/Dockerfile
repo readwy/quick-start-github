@@ -77,17 +77,11 @@ RUN . /etc/profile && \
 
 # image_name: claude:v$(date "+%Y%m%d%H%M%S")
 # docker build --tag registry.cn-hangzhou.aliyuncs.com/cases/claude:$(date "+%Y%m%d%H%M%S") .
-# touch /apps/claude/.claude.json
-# touch /apps/claude/settings.json
 # mkdir -p /apps/claude/workspace
 # chown -R 1001:1001 /apps/claude
-# chown 1001:1001 /apps/claude/.claude.json
-# chown 1001:1001 /apps/claude/settings.json
 #
 # docker run --rm -it --net=host \
 # -e TZ=Asia/Shanghai \
-# -v /apps/claude/.claude.json:/home/dev/.claude.json \
-# -v /apps/claude/settings.json:/home/dev/.claude/settings.json \
 # -v /apps/claude/workspace:/apps/claude/workspace \
 # -w /apps/claude/workspace \
 # registry.cn-hangzhou.aliyuncs.com/cases/claude:20260430155304 bash
