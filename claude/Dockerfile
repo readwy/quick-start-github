@@ -47,6 +47,8 @@ RUN DEBIAN_FRONTEND=noninteractive && \
     npm install -g agent-browser && \
     agent-browser install --with-deps && \
     useradd -m dev -s /bin/bash && mkdir -p /home/dev/.claude && \
+    mkdir -p /root/.pip && echo '[global]\nindex-url=http://mirrors.aliyun.com/pypi/simple/\n[install]\ntrusted-host=mirrors.aliyun.com' > /root/.pip/pip.conf && \
+    mkdir -p /home/dev/.pip && echo '[global]\nindex-url=http://mirrors.aliyun.com/pypi/simple/\n[install]\ntrusted-host=mirrors.aliyun.com' > /home/dev/.pip/pip.conf && \
     echo "source /etc/profile" >> /home/dev/.bashrc && chown -R dev: /home/dev
 
 USER dev
