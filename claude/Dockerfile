@@ -6,6 +6,7 @@ ENV HOSTNAME=claude
 
 RUN DEBIAN_FRONTEND=noninteractive && \
     apt update && apt install -y curl wget jq python3-dev build-essential xz-utils git && rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /root/.pip && echo '[global]\nindex-url=http://mirrors.aliyun.com/pypi/simple/\n[install]\ntrusted-host=mirrors.aliyun.com' > /root/.pip/pip.conf && \
     curl -o /tmp/node-v24.15.0-linux-x64.tar.xz https://nodejs.org/dist/v24.15.0/node-v24.15.0-linux-x64.tar.xz && \
     curl -o /tmp/node-v22.22.2-linux-x64.tar.xz https://nodejs.org/dist/v22.22.2/node-v22.22.2-linux-x64.tar.xz && \
     curl -o /tmp/node-v20.20.2-linux-x64.tar.xz https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-x64.tar.xz && \
@@ -47,13 +48,12 @@ RUN DEBIAN_FRONTEND=noninteractive && \
     npm install -g agent-browser && \
     agent-browser install --with-deps && \
     useradd -m dev -s /bin/bash && mkdir -p /home/dev/.claude && \
-    mkdir -p /root/.pip && echo '[global]\nindex-url=http://mirrors.aliyun.com/pypi/simple/\n[install]\ntrusted-host=mirrors.aliyun.com' > /root/.pip/pip.conf && \
-    mkdir -p /home/dev/.pip && echo '[global]\nindex-url=http://mirrors.aliyun.com/pypi/simple/\n[install]\ntrusted-host=mirrors.aliyun.com' > /home/dev/.pip/pip.conf && \
     echo "source /etc/profile" >> /home/dev/.bashrc && chown -R dev: /home/dev
 
 USER dev
 
 RUN . /etc/profile && \
+    mkdir -p /home/dev/.pip && echo '[global]\nindex-url=http://mirrors.aliyun.com/pypi/simple/\n[install]\ntrusted-host=mirrors.aliyun.com' > /home/dev/.pip/pip.conf && \
     claude plugin marketplace add forrestchang/andrej-karpathy-skills && \
     claude plugin marketplace add obra/superpowers-marketplace && \
     claude plugin marketplace add anthropics/skills && \
