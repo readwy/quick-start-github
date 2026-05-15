@@ -1,4 +1,4 @@
-name: docker-build-push-on-push
+name: docker build and push by push
 
 on:
   workflow_dispatch:

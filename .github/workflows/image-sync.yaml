@@ -1,4 +1,4 @@
-name: images synchronization
+name: images synchronization on push
 
 on:
   push:
