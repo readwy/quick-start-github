@@ -78,7 +78,6 @@ RUN . /etc/profile && \
 
 # image_name: claude:v$(date "+%Y%m%d%H%M%S")
 # docker build --tag registry.cn-hangzhou.aliyuncs.com/cases/claude:$(date "+%Y%m%d%H%M%S") .
-# docker build --tag registry.cn-hangzhou.aliyuncs.com/cases/claude:20260430155304 .
 # touch /apps/claude/.claude.json
 # touch /apps/claude/settings.json
 # mkdir -p /apps/claude/workspace
